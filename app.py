@@ -1,95 +1,145 @@
 import streamlit as st
+import pandas as pd
 import numpy as np
 import joblib
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-st.set_page_config(page_title="Trader Personality Predictor", layout="centered")
-st.title("📊 Trader Personality Predictor")
-st.markdown("Enter **aggregated trading features** of a trader below to predict their personality cluster.")
+st.set_page_config(page_title="Trader Profiling Dashboard", layout="wide")
 
-# Load models
+# Load pre-trained models
 @st.cache_resource
 def load_models():
     scaler = joblib.load('models/scaler.pkl')
-    kmeans_model = joblib.load('models/best_kmeans_model.pkl')
-    return scaler, kmeans_model
+    model = joblib.load('models/best_kmeans_model.pkl')
+    return scaler, model
 
 scaler, kmeans_model = load_models()
 
-# Form layout
-with st.form("input_form"):
-    st.subheader("🔢 Trader Feature Inputs")
-    avg_pnl = st.number_input("Average PnL (avg_pnl)", 
-                              value=500.0, 
-                              format="%.2f", 
-                              help="Example: 500.0 — Average profit or loss per trade")
-    
-    pnl_std = st.number_input("PnL Standard Deviation (pnl_std)", 
-                              value=1200.0, 
-                              format="%.2f", 
-                              help="Example: 1200.0 — Higher = more volatile trader")
-    
-    max_drawdown = st.number_input("Max Drawdown (max_drawdown)", 
-                                   value=-7000.0, 
-                                   format="%.2f", 
-                                   help="Example: -7000.0 — Total losses from negative trades")
-    
-    win_rate = st.number_input("Win Rate (win_rate)", 
-                               min_value=0.0, max_value=1.0, 
-                               value=0.55, 
-                               format="%.2f", 
-                               help="Fraction of profitable trades. Example: 0.55 for 55% win rate")
-    
-    trade_count = st.number_input("Total Trades (trade_count)", 
-                                  min_value=1, 
-                                  value=50, 
-                                  step=1, 
-                                  help="Example: 50 — Number of trades the trader made")
-    
-    avg_quantity = st.number_input("Average Quantity (avg_quantity)", 
-                                   min_value=1.0, 
-                                   value=25.0, 
-                                   format="%.2f", 
-                                   help="Example: 25 — Average quantity per trade")
-    
-    avg_price = st.number_input("Average Price (avg_price)", 
-                                min_value=1.0, 
-                                value=2400.0, 
-                                format="%.2f", 
-                                help="Example: 2400.0 — Average traded price")
-    
-    total_pnl = st.number_input("Total PnL (total_pnl)", 
-                                value=12000.0, 
-                                format="%.2f", 
-                                help="Example: 12000.0 — Cumulative profit or loss")
+# Personality assignment function
+def assign_personality(row):
+    if row['win_rate'] > 0.6 and row['avg_pnl'] > 1000:
+        return "Aggressive"
+    elif row['win_rate'] < 0.4 and row['pnl_std'] > 2000:
+        return "Erratic"
+    elif row['win_rate'] > 0.5 and row['pnl_std'] < 1000:
+        return "Conservative"
+    else:
+        return "Moderate"
 
-    submitted = st.form_submit_button("🔍 Predict Personality")
+# App Title
+st.title("💹 Trader Profiling & Personality Clustering")
 
-if submitted:
-    # Prepare input array
-    input_features = np.array([[avg_pnl, pnl_std, max_drawdown, win_rate,
-                                trade_count, avg_quantity, avg_price, total_pnl]])
+st.markdown("""
+This dashboard helps identify trader personalities like **Aggressive**, **Conservative**, or **Erratic** 
+based on trading metrics, using clustering and PCA.
 
-    # Scale and predict
-    X_scaled = scaler.transform(input_features)
-    cluster = kmeans_model.predict(X_scaled)[0]
+👉 Choose how you'd like to input trader data:
+""")
 
-    # Assign personality
-    def assign_personality(row):
-        if row[3] > 0.6 and row[0] > 1000:
-            return "Aggressive"
-        elif row[3] < 0.4 and row[1] > 2000:
-            return "Erratic"
-        elif row[3] > 0.5 and row[1] < 1000:
-            return "Conservative"
-        else:
-            return "Moderate"
+mode = st.radio("Select Input Mode:", ['🔘 Manual Entry (Single Trader)', '📁 Upload CSV (Batch Profiling)'])
 
-    personality = assign_personality(input_features[0])
+# ---- SINGLE ENTRY ----
+if mode == '🔘 Manual Entry (Single Trader)':
+    st.subheader("Enter Trader Metrics")
+    
+    with st.form("manual_form"):
+        avg_pnl = st.number_input("Average PnL", value=1000.0, step=100.0, help="E.g., 1200.0")
+        pnl_std = st.number_input("PnL Standard Deviation", value=800.0, step=50.0, help="E.g., 500.0")
+        max_drawdown = st.number_input("Max Drawdown", value=-3000.0, step=100.0, help="E.g., -2500.0")
+        win_rate = st.slider("Win Rate", min_value=0.0, max_value=1.0, value=0.55, help="Fraction between 0 and 1")
+        trade_count = st.number_input("Number of Trades", value=50, step=1)
+        avg_quantity = st.number_input("Average Quantity", value=25.0, step=1.0)
+        avg_price = st.number_input("Average Price", value=2500.0, step=10.0)
+        total_pnl = st.number_input("Total PnL", value=15000.0, step=500.0)
 
-    # Output
-    st.success("Prediction complete!")
-    st.subheader("🧠 Result")
-    st.markdown(f"**Cluster ID:** `{cluster}`")
-    st.markdown(f"**Predicted Personality:** `{personality}`")
+        submitted = st.form_submit_button("🔍 Profile Trader")
+    
+    if submitted:
+        input_df = pd.DataFrame([{
+            'avg_pnl': avg_pnl,
+            'pnl_std': pnl_std,
+            'max_drawdown': max_drawdown,
+            'win_rate': win_rate,
+            'trade_count': trade_count,
+            'avg_quantity': avg_quantity,
+            'avg_price': avg_price,
+            'total_pnl': total_pnl
+        }])
 
-    st.info("Note: Personality is based on thresholds defined by average PnL, win rate, and volatility (PnL std dev).")
+        scaled_input = scaler.transform(input_df)
+        cluster = kmeans_model.predict(scaled_input)[0]
+        personality = assign_personality(input_df.iloc[0])
+        
+        st.success(f"📌 Trader belongs to **Cluster {cluster}** and is identified as **{personality}**")
+
+        # PCA visualization (project new point)
+        pca = PCA(n_components=2)
+        X_existing = scaler.transform(pd.read_pickle('data/final_trader_features.pkl')[[
+            'avg_pnl', 'pnl_std', 'max_drawdown', 'win_rate',
+            'trade_count', 'avg_quantity', 'avg_price', 'total_pnl']])
+        X_all = np.vstack([X_existing, scaled_input])
+        pca_result = pca.fit_transform(X_all)
+
+        st.subheader("PCA Projection")
+        fig, ax = plt.subplots()
+        sns.scatterplot(x=pca_result[:-1, 0], y=pca_result[:-1, 1], alpha=0.3, label="Existing Traders")
+        plt.scatter(pca_result[-1, 0], pca_result[-1, 1], color='red', s=150, label="Your Input", edgecolor='black')
+        plt.xlabel("PC1")
+        plt.ylabel("PC2")
+        plt.title("PCA Projection of Trader Behavior")
+        plt.legend()
+        st.pyplot(fig)
+
+# ---- BATCH ENTRY ----
+else:
+    st.subheader("Upload CSV of Trader Metrics")
+    st.markdown("""
+    Ensure your CSV has the following columns:
+    `avg_pnl`, `pnl_std`, `max_drawdown`, `win_rate`, `trade_count`, `avg_quantity`, `avg_price`, `total_pnl`
+    """)
+
+    uploaded_file = st.file_uploader("📤 Upload CSV", type=['csv'])
+
+    if uploaded_file:
+        try:
+            df = pd.read_csv(uploaded_file)
+            required_cols = ['avg_pnl', 'pnl_std', 'max_drawdown', 'win_rate',
+                             'trade_count', 'avg_quantity', 'avg_price', 'total_pnl']
+            if not all(col in df.columns for col in required_cols):
+                st.error("❌ CSV missing required columns.")
+            else:
+                st.write("📄 Preview of Uploaded Data:")
+                st.dataframe(df.head())
+
+                X = scaler.transform(df[required_cols])
+                clusters = kmeans_model.predict(X)
+                df['cluster'] = clusters
+                df['personality'] = df.apply(assign_personality, axis=1)
+
+                # PCA for visual
+                pca = PCA(n_components=2)
+                components = pca.fit_transform(X)
+                df['PC1'], df['PC2'] = components[:, 0], components[:, 1]
+
+                st.subheader("🔍 Clustering & Personality Results")
+                st.dataframe(df)
+
+                # Visualize clusters
+                st.subheader("🧠 PCA Cluster Visualization")
+                fig2, ax2 = plt.subplots()
+                sns.scatterplot(data=df, x='PC1', y='PC2', hue='personality', palette='Set2', s=100, edgecolor='black')
+                plt.title("Trader Clusters and Personalities")
+                st.pyplot(fig2)
+
+                # Summary stats
+                st.subheader("📊 Cluster-wise Summary Stats")
+                st.dataframe(df.groupby('cluster')[required_cols].agg(['mean', 'median', 'std']))
+
+                # Download
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Download Results CSV", data=csv, file_name="clustered_traders.csv")
+
+        except Exception as e:
+            st.error(f"Error processing file: {e}")
